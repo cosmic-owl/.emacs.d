@@ -1,40 +1,58 @@
 ;; ==========================================
-;; FONT SETUP
+;; FORCE TRUE COLORS IN EMACS
+;; ==========================================
+(setq xterm-extra-capabilities '(getSelection setSelection))
+(unless (display-graphic-p)
+  (setq-default custom-enabled-themes '(solarized-dark))
+  (setenv "COLORTERM" "truecolor"))
+
+;; ==========================================
+;; FONT SETUP & LIGATURES
 ;; ==========================================
 (when (display-graphic-p)
   (set-face-attribute 'default nil :font "Fira Code" :height 120))
 
+(use-package ligature
+  :ensure t
+  :config
+  ;; Enable traditional programming ligatures in programming modes
+  (ligature-set-ligatures 'prog-mode 
+                          '("|||" "&&&" "===" "==" "=>" "->" "::" "::=" "==" "!=" "!==" 
+                            "++" "+++" "<!--" "-->" "||" "&&" ">>=" "<<=" "->" "<-"))
+  ;; Activate it globally across all supported buffers
+  (global-ligature-mode t))
 
 ;; ==========================================
 ;; PACKAGE MANAGEMENT & EMACS SETUP
 ;; ==========================================
 (require 'package)
-(setq package-archives '(("melpa" . "https://melpa.org/packages/")
+
+;; Use MELPA and MELPA Stable to entirely avoid GNU server connection bugs
+(setq package-archives '(("melpa"        . "https://melpa.org/packages/")
+                         ("melpa-stable" . "https://stable.melpa.org/packages/")
                          ("gnu" . "https://elpa.gnu.org/packages/")))
 
-;; Force Emacs to fetch the MELPA index if it hasn't already done so this session
-(unless package-archive-contents
-  (package-refresh-contents))
+;; Keep network handshakes loose to ensure smooth downloading
+(setq package-check-signature nil)
+(setq gnutls-algorithm-priority "NORMAL:-VERS-TLS1.3")
 
-;; Automatically download use-package if it's not already installed
-(unless (package-installed-p 'use-package)
-  (package-refresh-contents)
-  (package-install 'use-package))
+;; Activate local packages first using disk cache
+(package-initialize)
 
 (eval-when-compile
   (require 'use-package))
 (setq use-package-always-ensure t) ;; Forces use-package to install missing packages
 
 ;; ==========================================
-;; THEME (Doom One Light)
+;; THEME (Doom Bluloco Dark)
 ;; ==========================================
 (use-package doom-themes
   :ensure t
   :config
-  (load-theme 'doom-one-light t))
+  (load-theme 'doom-bluloco-dark t))
 
 ;; ==========================================
-;; 1. PROJECTILE (Project Management)
+;; 1. PROJECTILE & INTERACTIVE SEARCH
 ;; ==========================================
 (use-package projectile
   :init
@@ -42,19 +60,89 @@
   :bind-keymap
   ("C-c p" . projectile-command-map)
   :config
-  ;; Combined paths from your duplicate definitions
   (setq projectile-project-search-path '("~/projects/" "~/Development/"))
-  
-  ;; Crucial: Allow it to look inside subfolders (c, cpp, nodejs, etc.)
-  (setq projectile-project-search-depth 2)
-  (setq projectile-completion-system 'ivy))
+  (setq projectile-project-search-depth 3)
+  (setq projectile-completion-system 'ivy)
+
+  ;; Build & Compilation Enhancements
+  (setq projectile-use-git-grep t)                  ; Speeds up project-wide search
+  (setq compilation-scroll-output 'first-error)     ; Auto-scrolls compilation logs to the first error
+  (setq projectile-compilation-save-buffers t)      ; Auto-saves modified files before compiling
+  (setq projectile-remember-window-configs t))      ; Remembers your window layouts across sessions
+
+;; Counsel bridges Ivy with native project search engines
+(use-package counsel
+  :ensure t
+  :after ivy
+  :config
+  (counsel-mode +1))
+
+(use-package projectile-ripgrep
+  :ensure t
+  :after projectile)
 
 ;; ==========================================
 ;; 2. MAGIT (The Ultimate Git Interface)
 ;; ==========================================
 (use-package magit
   :bind
-  ("C-x g" . magit-status)) ;; The magic keybinding to open the Git dashboard
+  ("C-x g" . magit-status))
+
+;; ==========================================
+;; 2b. CUSTOM DEV DASHBOARD (Daemon-Optimized)
+;; ==========================================
+(use-package dashboard
+  :ensure t
+  :config
+  ;; Welcome headings & aesthetics
+  (setq dashboard-banner-logo-title "Welcome Back, Developer Workspace Active")
+  (setq dashboard-footer-messages '("Happy Hacking! Code is poetry."))
+  (setq dashboard-center-content t)
+  (setq dashboard-show-shortcuts t)
+
+  ;; Track workspaces using Projectile
+  (setq dashboard-projects-backend 'projectile)
+
+  ;; 1. DEFINE TERMINAL-SAFE CUSTOM LAB WIDGET WITH INTERACTIVE ANCHORS
+  (defun dashboard-insert-container-labs (_)
+    "Render your isolated development container shortcuts cleanly via terminal text buttons."
+    (insert "\n== [ Container Development Labs ] ==\n\n")
+    (insert "   ")
+    (insert-button "[j] Java Lab"   'action (lambda (&rest _) (open-java-lab))   'follow-link t)
+    (insert "     ")
+    (insert-button "[c] C Lab"      'action (lambda (&rest _) (open-c-lab))      'follow-link t)
+    (insert "     ")
+    (insert-button "[+] C++ Lab"    'action (lambda (&rest _) (open-cpp-lab))    'follow-link t)
+    (insert "     ")
+    (insert-button "[y] Python Lab" 'action (lambda (&rest _) (open-python-lab)) 'follow-link t)
+    (insert "     ")
+    (insert-button "[n] Node Lab"   'action (lambda (&rest _) (open-node-lab))   'follow-link t)
+    (insert "\n"))
+
+  ;; 2. REGISTER THE LABS WIDGET INTO THE GENERATOR REGISTRY
+  (setq dashboard-item-generators  
+        '((labs     . dashboard-insert-container-labs)
+          (recents  . dashboard-insert-recents)
+          (projects . dashboard-insert-projects)))
+
+  ;; 3. ARRANGE LAYOUT (Labs custom widget first, then standard lists)
+  (setq dashboard-items '((labs     . t)
+                          (recents  . 5)
+                          (projects . 5)))
+
+  ;; Avoid loading on headless background boot
+  (unless (daemonp)
+    (dashboard-setup-startup-hook))
+
+  ;; 4. SAFE CLIENT FRAME CONNECTOR
+  ;; Switches to the dashboard frame buffer cleanly the exact second a client attaches
+  (add-hook 'server-after-make-frame-hook
+            (lambda ()
+              (with-current-buffer (get-buffer-create "*dashboard*")
+                (unless (eq major-mode 'dashboard-mode)
+                  (dashboard-mode))
+                (switch-to-buffer "*dashboard*")
+                (ignore-errors (dashboard-refresh-buffer))))))
 
 ;; ==========================================
 ;; 3. EDITORCONFIG (Consistency Across Stacks)
@@ -66,43 +154,46 @@
 ;; ==========================================
 ;; 4. TREE-SITTER (Modern Syntax Highlighting)
 ;; ==========================================
-;; Maps programming modes to use their tree-sitter variants (Emacs 29+)
-(setq major-mode-remap-alist
-      '((c-mode . c-ts-mode)
-        (c++-mode . c++-ts-mode)
-        (python-mode . python-ts-mode)
-        (js-mode . js-ts-mode)
-	(js2-mode . js-ts-mode)
-        (typescript-mode . typescript-ts-mode)
-	(tsx-mode . tsx-ts-mode)
-	(bash-mode . bash-ts-mode)
-	(java-mode . java-ts-mode)))
+;; Maps standard programming modes to use their modern tree-sitter variants
+;;  Temporarily disabled while debugging ABI issues
+;;(use-package treesit-auto
+;;  :ensure t
+;;  :custom
+;;  (treesit-auto-install 'prompt)
+;;  :config
+;;  (global-treesit-auto-mode))
 
 (setq treesit-language-source-alist
-      '((c "https://github.com/tree-sitter/tree-sitter-c" "v0.20.8")
-	(cpp "https://github.com/tree-sitter/tree-sitter-cpp" "v0.22.3")
-	(python "https://github.com/tree-sitter/tree-sitter-python" "v0.21.0")
-	(bash "https://github.com/tree-sitter/tree-sitter-bash" "v0.21.0")
-	(java "https://github.com/tree-sitter/tree-sitter-java" "v0.21.0")
-        (javascript "https://github.com/tree-sitter/tree-sitter-javascript" "v0.21.4")
-        (typescript "https://github.com/tree-sitter/tree-sitter-typescript" "v0.21.2" "typescript/src")
-        (tsx "https://github.com/tree-sitter/tree-sitter-typescript" "v0.21.2" "tsx/src")))
+      '((bash "https://github.com/tree-sitter/tree-sitter-bash" "v0.23.3")
+        (c "https://github.com/tree-sitter/tree-sitter-c" "v0.23.0")
+        (cpp "https://github.com/tree-sitter/tree-sitter-cpp" "v0.22.0")
+        (css "https://github.com/tree-sitter/tree-sitter-css" "v0.23.0")
+        (html "https://github.com/tree-sitter/tree-sitter-html" "v0.23.0")
+        (java "https://github.com/tree-sitter/tree-sitter-java" "v0.23.0")
+        (javascript "https://github.com/tree-sitter/tree-sitter-javascript" "v0.23.0")
+        (python "https://github.com/tree-sitter/tree-sitter-python" "v0.23.6")
+        ;; TypeScript repo contains two separate grammars in subdirectories
+        (typescript "https://github.com/tree-sitter/tree-sitter-typescript" "v0.23.0" "typescript/src")
+        (tsx "https://github.com/tree-sitter/tree-sitter-typescript" "v0.23.0" "tsx/src")))
 
-;; Automatically downloads the language grammar engines
-(use-package treesit-auto
-  :config
-  (global-treesit-auto-mode))
+;; Optional: Automatically install them if they are missing
+(dolist (lang '(bash c cpp css html java javascript python typescript tsx))
+  (unless (treesit-language-available-p lang)
+    (treesit-install-language-grammar lang)))
 
 ;; ==========================================
 ;; 5. LSP & DEVELOPMENT (Eglot & Performance)
 ;; ==========================================
 (use-package eglot
-  :ensure nil ;; Built-in to Emacs 29+
+  :ensure nil
   :hook
   ((c-ts-mode . eglot-ensure)
    (c++-ts-mode . eglot-ensure)
-   (c-mode-hook . eglot-ensure)
-   (c++-mode-hook . eglot-ensure)))
+   (python-ts-mode . eglot-ensure)
+   (js-ts-mode . eglot-ensure)
+   (java-ts-mode . eglot-ensure))
+  :config
+  (add-to-list 'eglot-server-programs '(java-ts-mode . ("jdtls"))))
 
 ;; Tweak performance thresholds for smoother typing with LSP/Eglot
 (setq read-process-output-max (* 1024 1024)) ;; 1mb
@@ -126,31 +217,76 @@
                  (tramp-remote-shell-args ("-c")))))
 
 ;; ==========================================
-;; 7. ADD FONT LIGATURES (Fira Code Font Setup)
-;; ==========================================
-(use-package ligature
-  :ensure t
-  :config
-  ;; Enable traditional programming ligatures in programming modes
-  (ligature-set-ligatures 'prog-mode 
-    '("|||" "&&&" "===" "==" "=>" "->" "::" "::=" "==" "!=" "!==" 
-      "++" "+++" "<!--" "-->" "||" "&&" ">>=" "<<=" "->" "<-"))
-  
-  ;; Activate it globally across all supported buffers
-  (global-ligature-mode t))
-
-;; ==========================================
-;; 8. Setup Org Mode Agenda
+;; 7. ORG MODE AGENDA
 ;; ==========================================
 (setq org-agenda-files '("~/org/"))
 (global-set-key (key-parse "C-c a") 'org-agenda)
 
+;; ==========================================
+;; 8. CODE FORMATTING & INDENTATION
+;; ==========================================
+(setq-default indent-tabs-mode nil) ; Default to spaces instead of tabs
+(setq-default tab-width 4)          ; Default structural tab fallback
+
+;; Language-Specific Indentation Offsets
+(setq c-basic-offset 4)
+(setq-default c-ts-mode-indent-offset 4)
+(setq-default c++-ts-mode-indent-offset 4)
+(setq-default java-ts-mode-indent-offset 4)
+(setq-default python-ts-mode-indent-offset 4)
+
+;; Front-End & Config Offsets (Strictly require 2 spaces for readability/validity)
+(setq-default js-indent-level 2)
+(setq-default css-ts-mode-indent-offset 2)
+(setq-default html-ts-mode-indent-offset 2)
+(setq-default yaml-ts-mode-indent-offset 2) ; YAML strictly outlaws literal tabs
+
+;; Tab Behavior Logic Rule Protection
+(setq-default tab-always-indent t)
+
+;; Asynchronous Format-on-Save via Apheleia
+(use-package apheleia
+  :ensure t
+  :init
+  (apheleia-global-mode +1))
 
 ;; ==========================================
-;; 9. Set theme
+;; 9. CUSTOM INTERACTIVE FUNCTIONS & SERVER
 ;; ==========================================
-(load-theme 'doom-bluloco-dark t)
-;;(load-theme 'doom-solarized-light t)
+(defun open-java-lab ()
+  "Jump straight into the javalab Distrobox container workspace."
+  (interactive)
+  (dired "/podman:javalab:/home/gitoram/projects/java"))
+
+(defun open-c-lab ()
+  "Jump straight into the clab Distrobox container workspace for C."
+  (interactive)
+  (dired "/podman:clab:/home/gitoram/projects/c"))
+
+(defun open-cpp-lab ()
+  "Jump straight into the cpplab Distrobox container workspace for C++."
+  (interactive)
+  (dired "/podman:cpplab:/home/gitoram/projects/cpp"))
+
+(defun open-python-lab ()
+  "Jump straight into the pylab Distrobox container workspace for Python."
+  (interactive)
+  (dired "/podman:pythonlab:/home/gitoram/projects/python"))
+
+(defun open-node-lab ()
+  "Jump straight into the nodelab Distrobox container workspace for JS/TS/Express."
+  (interactive)
+  (dired "/podman:nodelab:/home/gitoram/projects/node"))
+
+;; --- Global Keybindings ---
+(global-set-key (kbd "C-c j") 'open-java-lab)   ; Java
+(global-set-key (kbd "C-c c") 'open-c-lab)      ; C
+(global-set-key (kbd "C-c C") 'open-cpp-lab)    ; C++ (Shift + C)
+(global-set-key (kbd "C-c y") 'open-python-lab) ; Python
+(global-set-key (kbd "C-c n") 'open-node-lab)   ; Node / TS / Express
+
+;; Start Emacs background daemon server
+(server-start)
 
 ;; ==========================================
 ;; CUSTOM GENERATED SETTINGS (Keep at bottom)
@@ -209,7 +345,9 @@
      "0325a6b5eea7e5febae709dab35ec8648908af12cf2d2b569bedc8da0a3a81c1"
      "8d3ef5ff6273f2a552152c7febc40eabca26bae05bd12bc85062e2dc224cde9a"
      default))
- '(package-selected-packages nil))
+ '(package-selected-packages
+   '(apheleia counsel dashboard doom-themes ligature magit
+              projectile-ripgrep)))
 (custom-set-faces
  ;; custom-set-faces was added by Custom.
  ;; If you edit it by hand, you could mess it up, so be careful.
